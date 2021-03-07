@@ -1,0 +1,481 @@
+---
+pdf_document: 
+  fig_width: 7
+  fig_height: 7
+  highlight: kate
+author: "Daniel David de Oliveira"
+date: "25 de Dezembro de 2020"
+output: 
+  pdf_document: 
+    fig_width: 7
+    fig_height: 7
+title: "Calina - Prova Técnica"
+institute:
+document class: article
+header-includes:
+- \usepackage[T1]{fontenc}
+- \usepackage[utf8]{inputenc}
+- \usepackage{amsmath}
+- \usepackage{setspace}\singlespacing
+- \usepackage{float}
+- \usepackage{graphicx}
+- \usepackage{multirow}
+subtitle: 
+fig_width: 10
+fontsize: 12pt
+geometry: margin=0.75in
+fig_height: 6
+classoption: a4paper
+---
+# *CASE*
+
+Em uma agência de *Marketing Digital* uma das épocas mais importante para o ramo de *ecommerce* é a *"Black Friday"*, período sazonal em que muitos dos clientes se planejam com promoções e ações através das mídias pagas para chamar a atenção dos usuários. Pensando nessa data muito especial    , um cliente da Calina solicitou uma análise para prevermos qual será a receita da *Black Friday* de 2020. 
+
+O banco de dados enviado contém dados de 3 mídias em que o cliente investe (Mídia A, B e C) e o total da receita gerada no site por semana, desde a primeira semana de 2018 até a última semana de outubro de 2020. 
+
+Para responder ao cliente análise o banco de dados, crie um modelo teste e um modelo final que deve prever as próximas 4 semanas, respectivas ao mês de novembro de 2020 (a última semana é a semana da *Black Friday*).
+
+
+
+***Resposta:***
+Para a solução do problema, focarei na variável Total da receita gerada por semana, chamando-a de Receita Total ou Receita e usarei linguagem de cunho técnica/acadêmica para expor meus raciocínios. 
+
+# ***Lendo o Banco de dados:***
+```{r, warning=FALSE, message=FALSE}
+library(readxl)
+library(magrittr)
+library(ggplot2)
+library(fpp2)
+library(forecast)
+  library(GGally)
+library(lubridate)
+library(MLmetrics) 
+options(scipen = 10000000) #Tirar a notação científica dos gráficos
+
+dds <- read_excel("C:/Users/danie/OneDrive/Área de Trabalho/Calina - R/Ciência de Dados.xlsx",
+                 col_types = c("date", "numeric", "numeric", 
+                               "numeric", "numeric"))
+
+dados <- dds[-1]
+
+
+```
+
+
+Criando Séries usando o banco de dados 
+```{r}
+#Tirando a variável Week
+dados <- dds[-1]
+
+#Criando as Séries
+ts = ts(dados, 
+        start=c(2018, 1), 
+        frequency = 52)
+
+R.ts = ts(dados[,4], 
+          start = 2018, 
+          frequency = 52)
+
+
+```
+
+# ***Análise Descritiva Simples das Séries*** 
+
+Plot das Séries Temporais das Receitas A, B e C lado a lado
+
+```{r}
+autoplot(ts[,-4], facets=TRUE, 
+         main="Receitas das Séries lado a lado") +
+  ylab("Receitas (R$)") +
+  xlab("Tempo(Semanas)")
+```
+
+Mostra-se preditores adicionais possívelmente úteis. Importantes para previsão da Receita Total na qual o cliente irá investir nas mídias semanalmente.
+
+Construindo um modelo de regressão linear múltipla
+pode-se gerar previsões mais precisas utilizando as variáveis de receita das mídias A, B e C. Espera-se que uma, duas ou todas sejam dependentes da variável Receita Total.
+
+Correlação entre as variáveis de Receita e seus gráficos de dispersão
+
+```{r}
+ts %>%
+  as.data.frame() %>%
+  ggpairs()
+
+```
+
+A última linha mostra a relação entre a variável de previsão e cada um dos preditores (Receitas A, B e C). Os gráficos de dispersão mostram relações positivas entre as variáveis Receita e Mídia A, e Receita e Mídia B. A força dessas correlações são mostradas pela correlação dos coeficientes através da última coluna.
+
+
+Verificando o Comportamento da Série Temporal (ST) Receita
+
+```{r}
+autoplot(R.ts, xlab = "Ano", 
+         ylab = "Receita Total (R$)",
+         main="Série Temporal da Variável Receita Total")
+
+
+```
+
+Perecebe-se alguns picos nos últimos trimestres dos anos de 2018 e 2019. Podemos ver com mais clareza o comportamento da Série temporal Receita Total separada por Ano
+
+```{r}
+#Plot das Séries da Receita Total separada por Ano
+                #library - forecast
+ggseasonplot(R.ts, xlab="Semana", 
+             main="Receita Total Separada por ano") 
+
+
+```
+
+De fato, percebemos um pico de investimento na semana 47 do ano de 2018, outro na semana 48 em 2019, correspondentes aos dias 19/11/2018 e 25/11/2020, datas próximas a *Black Friday* (BF) de cada ano, esse fato pode ser de suma importância futuramente, visto que nossa última semana de previsão terá o evento BF. 
+
+*Comentário:* No eixo x o número das semanas estão sobrepostos, no código R podemos ver um pouco mais com clareza qual semana é qual.
+
+
+Decomposição da ST Receita Total
+
+```{r}
+#Decomposição
+R.ts %>% decompose(type="multiplicative") %>%
+  autoplot() + xlab("Ano") +
+  ggtitle("Decomposição da Variável Receita Total")
+
+```
+
+O primeiro gráfico nos mostra o comportamento da Série Temporal da variável Receita.
+O segundo, mostra-nos a tendencia que a séria possui.
+O terceiro mostra a sazonalidade e percebemos que no último trimestre há um pico na Receita Total, creio que seja altos investimentos na semana da *Black Friday*.
+
+
+
+
+# ***Escolha do Modelo***
+
+Munido dos gráficos de correlação e decomposição, podemos supor alguns modelos.
+
+Das correlações, imagina-se dois modelos:
+
+A primeira suposição, um modelo de Regressão linear com todas as mídias:
+
+```{r}
+#Receita ~ A + B + C
+fit  <- tslm(Receita ~ A + B + C, 
+             data = ts)
+```
+
+A Segunda retirando do modelo o investimento da mídia B:
+
+```{r}
+#Não contando com a mídia B
+#Receita ~ A  + C
+fit2 <- tslm(Receita ~ A + C, 
+             data = ts)
+```
+
+Terceira ajustando o modelo contando com a sazonalidade e tendência da série temporal. Pode ser um ótimo modelo pela sazonalidade, por outro lado, a tedência pode nos atrapalhar nas previsões das próximas semanas. Apoiando-me no gráfico de Trend mostrado no *plot* de Decomposição: 
+
+```{r}
+#Receita ~ Tendência + Temporada
+fit3  <- tslm(Receita ~  trend + season, 
+              data = ts)
+
+```
+
+Por fim o modelo usando somente a sazonalidade:
+
+```{r}
+#Receita ~ Temporada
+fit4 <- tslm(Receita ~ season, 
+             data = ts)
+```
+
+Iremos calcular a estatística de validação cruzada e verificar qual terá o BIC maior. 
+
+```{r}
+CV(fit)
+CV(fit2)
+CV(fit3)
+CV(fit4)
+
+```
+
+Seguimos em frente com o modelo 'fit4' por possuir o maior BIC, e atento ao enunciado, faz sentido que o modelo adote sazonalidade. 
+
+# ***Modelo de Teste***
+
+A principal pergunta do modelo é: "Quanto o modelo erra em suas previsões?"
+
+A lógica do Modelo de Teste é: 
+Terá 4 etapas, onde teremos 4 modelos de treinos, onde o primeiro contará com as semanas de 1 a 147 e vamos prever a semana 148, comparar os valores da semana prevista com a semana de dado bruto usando a função MAPE() - Perda média de regressão de erro percentual absoluto.
+
+O segundo modelo contará com as semanas de 1 a 146, vamos prever as semanas 147 e 148, comparar os valores das semanas previstas com as semanas com os dados brutos correspondentes usando a função MAPE(). 
+
+Seguimos essa lógica ate o quarto e último modelo de treino comparando as semanas 145 a 148 e calcularemos seus MAPEs.
+
+O erro percentual absoluto médio (MAPE) é uma medida estatística de quão preciso é um sistema de previsão. Ele mede essa precisão como uma porcentagem, e pode ser calculado como o erro percentual absoluto médio para cada período de tempo menos valores reais divididos por valores reais.
+
+**Etapa 1** - Prevendo a semana 148 e comparando com o valor real do banco de dados
+
+```{r}
+#Prevendo a Última Semana
+ts.train <-ts(dados[1:147,],
+              start=c(2018,1,1), 
+              frequency = 52)
+
+train <- tslm(Receita ~ season,
+              data = ts.train)
+
+forecast(train, h=1)
+
+```
+
+
+```{r}
+e1 = MAPE(526964.7, 531238.9) # Semana 4 - 26/10/2020
+
+```
+
+**Etapa 2** - Prevendo as semanas 147 e 148 e comparando com o valores reais do banco de dados
+
+```{r}
+#Prevendo as 2 últimas Semanas
+ts.train <-ts(dados[1:146,], 
+              start=c(2018,1,1), 
+              frequency = 52)
+
+train <- tslm(Receita ~ season, 
+              data = ts.train)
+
+forecast(train, h=2)
+
+e2 = MAPE(526478.3, 519165.6) #Semana 3 -19/10/2020
+
+e3 = MAPE(526964.7, 531238.9) #Semana 4 - 26/10/2020
+```
+
+**Etapa 3** - Prevendo as semanas 146 a 148 e comparando com os valores reais do banco de dados
+
+```{r}
+#Prevendo as 3 últimas Semanas
+ts.train <-ts(dados[1:145,], 
+              start=c(2018,1,1), 
+              frequency = 52)
+
+train <- tslm(Receita ~ season, 
+              data = ts.train)
+
+forecast(train, h=3)
+
+e4 = MAPE(542231.8, 516503.7) #Semana 2  - 12/10/2020
+
+e5 = MAPE(526478.3, 519165.6) #Semana 3  - 19/10/2020 
+
+e6 = MAPE(526964.7, 531238.9) #Semana 4  - 26/10/2020
+```
+
+**Etapa 4** - Prevendo as semanas 145 a 148 e comparando com os valores reais do banco de dados
+
+```{r}
+#Prevendo as 4 últimas Semanas
+ts.train <-ts(dados[1:144,], 
+              start=c(2018,1,1), 
+              frequency = 52)
+
+train <- tslm(Receita ~ season, 
+              data = ts.train)
+
+forecast(train, h=4)
+
+
+e7 = MAPE(479803.6 , 443026.8) #Semana 1 - 05/10/2020
+
+e8 = MAPE(542231.8, 516503.7) #Semana 2 - 12/10/2020
+
+e9 = MAPE(526478.3, 519165.6) #Semana 3 - 19/10/2020
+
+e10 = MAPE(526964.7, 531238.9) #Semana 4 - 26/10/2020
+```
+
+E por fim, quanto o modelo erra, em média, nas suas previsões?
+
+```{r}
+
+mape <- c(e1,e2,e3,e4,e5,e6,e7,e8,e9,e10)
+  
+#Erro médio das minhas previsões é de 2.6%
+mean(mape)
+
+```
+O modelo erra em média 2.6% em suas previsões. 
+
+
+# ***Modelo Final***
+
+Vamos ver, graficamente, a previsão do modelo para as 4 próximas semanas
+
+```{r}
+fcst.R <- forecast(fit4, h=4)
+
+autoplot(fcst.R, xlab="Ano", 
+     ylab="Receita Total(R$)",
+     main="Regressão do Modelo")
+
+```
+
+Verificando o valor que está plotado no gráfico acima
+
+```{r}
+fcst.R
+
+```
+
+Só temos um problema com a sazonalidade, pois a série ta prevendo dois dias de alto investimento de mídia correspondentes as duas últimas semanas do mês de novembro, e sabemos que o cliente fará alto investimento na semana da *Black Friday*.
+
+Desejo continuar com o modelo fit4, mas precisamos fazer algum ajuste.
+
+Há duas possibilidades, a primeira fazer uma variável *dummy* indicando quais dias são *Black Friday* - alternativa sofisticada - podendo criar *dummy* para cada tipo de feriado, como Natal, Páscoa, Dia das Mães.
+
+E outra, apoiando-me no gráfico de Receita Total Separada por Ano, trocar os valores de investimento da semana 47 com a semana 48 do ano de 2018 - visto que para responder nosso Case é uma alternativa viável. 
+
+Usarei a segunda opção pois é a ferramenta que estou mais confortável de aplicar. Com isso, o nosso modelo ajustado de Teste manterá o erro médio próximo de 2.6% para cada previsão.
+
+# Modelo Final Ajustado
+
+```{r}
+#Trocando os valores
+dados1 <- dados
+dados1[47,4] <- 823460.9
+dados1[48,4] <- 1311737.6
+
+
+ts = ts(dados1, 
+        start=c(2018, 1), 
+        frequency = 52)
+
+R.ts = ts(dados1[,4], 
+          start = c(2018,1),
+          frequency = 52)
+```
+
+Perceba que agora possuímos picos de investimento nas semanas 48 dos anos 2018 e 2019.
+
+```{r}
+#Plot das Séries da Receita Total Separada por Ano
+
+ggseasonplot(R.ts, xlab="Semana", 
+             main="Receita Total Separada por ano")
+```
+
+```{r}
+fit4 <- tslm(Receita ~ season, 
+             data = ts)
+
+fcst.R <- forecast(fit4, h=4)
+```
+
+Vamos ver graficamente a previsão do modelo para as 4 próximas semanas
+
+```{r}
+autoplot(fcst.R, xlab="Ano", 
+     ylab="Receita Total(R$)",
+     main="Regressão do Modelo")
+
+
+```
+
+
+Verificando o valor que está plotado no gráfico acima
+
+```{r}
+fcst.R
+#plot(fcst.R)
+```
+
+Com isso conseguimos prever os investimentos semanal da Receita Total do cliente referente ao mês de novembro de 2020.
+
+Na **semana 1** referente ao dia **02/11/2020** teremos o investimento médio de *R$ 530 440,60*.
+
+Na **semana 2** referente ao dia **09/11/2020** teremos o investimento médio de *R$ 518 608,50*.
+
+Na **semana 3** referente ao dia **16/11/2020** teremos o investimento médio de *R$ 699 125,40*.
+
+Na **semana 4** referente ao dia **23/11/2020** - na semana da *Black Friday* - teremos o investimento médio de *R$ 1 252 218,80*.
+
+
+## ***Adendo***
+
+Houve a tentativa de utilizar uma variável *dummy* indicando os dias das *Black Friday*. Creio que não é viável fazer o método acima frequentemente. (*E.g.* o cliente investe fortemente na *Black Friday*, Natal e Dia dos Pais, o ajuste que fiz anteriormente não é sofisticado. O caminho certo é fazer variáveis *dummy*s para cada feriado). 
+
+Acho válido expôr minhas tentativas com a variável *dummy* para que, futuramente, podemos discutir caminhos viáveis e comentar possíveis equívocos.
+
+***Variável Black Friday - BF***
+
+Crio mais um data.frame e adiciono a variável BF com colunas de 0 (zeros) e depois indico quais semanas ocorreram o investimento do cliente com o valor 1 - já indico que esses valores são categóricos. 
+
+```{r}
+dados2<- dados
+dados2["BF"] <- rep('0', 148)
+dados2[47,5] <- '1'
+dados2[100,5]<- '1'
+
+
+
+```
+
+Adicionando as 4 semanas seguintes, o foco é tentar usar a variável BF de alguma forma e dizer pro modelo de predição que a última semana de Novembro de 2020 é *Black Friday*.
+
+```{r}
+linha <- data.frame(A=c(0, 0, 0, 0),
+B=c(0, 0, 0, 0),
+C=c(0, 0, 0, 0),
+Receita=c(0, 0, 0, 0),
+BF=c('0','0','0','1'))
+
+
+dados2 <- rbind(dados2, linha)
+```
+
+Série Temporal com as variável Receita e BF
+
+```{r}
+#ST com a variável BF
+ts = ts(dados2[,c(4,5)], 
+        start=c(2018, 1), 
+        frequency = 52)
+
+```
+
+Nesse passo paira a seguinte pergunta: "Como que digo pro modelo que a previsão da Quarta semana é a Semana do *Black Friday*?"
+Usando o código abaixo digo que quero usar os dados das semanas 1 a 148. Mas como digo para manter as informações da variável BF?
+
+Como em dados2 temos 152 semanas, digo para ir ate a semana 148, sendo a semana 44 de 2020. É por aqui que meu racicíciono para, pois eu quero usar a informação da variável BF de algum jeito e não vejo como.
+
+```{r}
+#janela de dados da semana 1 a semana 148
+ts.w <- window(ts, end = c(2020,44))
+
+```
+
+Quero ver o comportamento das previsões somente com a variável Receita e BF
+
+```{r}
+#Vamos ver o comportamento da ST para as 4 semanas
+
+fcst<-forecast(ts.w, h=4)
+fcst
+
+```
+
+E depois visualisar o comportamento em fit4
+
+```{r}
+#Usando o Modelo fit 4
+fit4 <- tslm(Receita ~ season, data = ts.w)
+CV(fit4)
+
+fcst<-forecast(fit4, h=4)
+fcst
+```
+
+Perceba que o problema com a sazonalidade parecida com o Modelo Final "Normal" - para os dois últimos modelos - permanece, ou seja, a série ta prevendo dois dias de alto investimento de mídia correspondentes as duas últimas semanas do mês de novembro. E esse quadro não é o ideal.
